@@ -31,13 +31,28 @@ func start_new_campaign() -> void:
 	if not objectives.is_empty():
 		objective_started.emit(objectives[0])
 
-func restore_from_save(idx: int, comp: Dictionary, glossary: Array[String]) -> void:
-	active_idx = clampi(idx, 0, objectives.size() - 1)
+func restore_from_save(idx: int, comp: Dictionary, glossary: Array[String], tour: Array = []) -> void:
+	active_idx = clampi(idx, 0, objectives.size())
 	completed_ids = comp.duplicate()
 	unlocked_glossary = glossary.duplicate()
+	_tour_visited.clear()
+	for s in tour:
+		var k: String = String(s)
+		_tour_visited[k] = true
+		var order := ["training", "vab", "mcc", "pad"]
+		var si: int = order.find(k)
+		if si >= 0 and active_idx < objectives.size() and String(objectives[active_idx].get("condition", "")) == "tour_4_signs":
+			_init_substeps_for(active_idx)
+			mark_substep(si)
 	_init_substeps_for(active_idx)
 	if active_idx < objectives.size():
 		objective_started.emit(objectives[active_idx])
+
+func get_tour_visited_list() -> Array[String]:
+	var out: Array[String] = []
+	for k in _tour_visited.keys():
+		out.append(String(k))
+	return out
 
 func _init_substeps_for(idx: int) -> void:
 	if idx < 0 or idx >= objectives.size():

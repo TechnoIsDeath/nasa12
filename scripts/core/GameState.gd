@@ -16,6 +16,8 @@ var comms_log: Array[String] = []
 var errors_log: Array[Dictionary] = []
 var chapter_scores: Dictionary = {}
 var sls_stacked_parts: Array[String] = []
+var mouse_sensitivity: float = 0.16
+var crt_enabled: bool = true
 
 var telemetry: Dictionary = {
 	"altitude_km": 0.0,

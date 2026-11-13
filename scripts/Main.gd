@@ -2,37 +2,85 @@ extends Node3D
 
 ## Escena raíz de Cosmic Blueprint: Misión Artemis (campaña de un solo rol).
 
+var player: FirstPersonPlayer
+var hud: MissionControlHUD
+var world: WorldManager
+var main_menu: MainMenu
+var _gameplay_started: bool = false
+
 func _ready() -> void:
-	var player := FirstPersonPlayer.new()
+	player = FirstPersonPlayer.new()
 	player.name = "Player"
 	player.position = Vector3(0.0, 0.25, 30.0) # Inicio dentro del dormitorio de Casa
 	add_child(player)
 
-	var hud := MissionControlHUD.new()
+	hud = MissionControlHUD.new()
 	hud.name = "MissionControlHUD"
 	add_child(hud)
 	hud.setup_player(player)
 
-	var world := WorldManager.new()
+	world = WorldManager.new()
 	world.name = "WorldManager"
 	add_child(world)
 	world.setup(player, hud)
 
+	main_menu = MainMenu.new()
+	main_menu.name = "MainMenu"
+	add_child(main_menu)
+
+	main_menu.play_slot_requested.connect(_on_play_slot_requested)
+	main_menu.quit_requested.connect(func() -> void: get_tree().quit(0))
+	hud.return_to_main_menu_requested.connect(_on_return_to_menu_requested)
+	hud.quit_game_requested.connect(func() -> void: get_tree().quit(0))
+
 	if OS.get_cmdline_user_args().has("--run-self-test"):
-		_run_automated_verification(player, hud, world)
+		main_menu.hide_menu()
+		await _run_automated_verification()
 		return
 
-	if SaveSystem.has_save():
-		SaveSystem.load_progress()
-	else:
-		ObjectiveManager.start_new_campaign()
+	ObjectiveManager.objective_completed.connect(func(_obj: Dictionary) -> void:
+		if _gameplay_started:
+			SaveSystem.save_progress(-1, player)
+	)
 
-	hud.show_hud_notice("Bienvenido, Ingeniero · Sigue la baliza (tecla H para briefing)", UITheme.CYAN)
+	# Iniciar en el Menú Principal (con interfaz de partidas estilo Cuphead / Hollow Knight)
+	hud.set_menu_blocked(true)
+	main_menu.show_menu("title")
+
+func _on_play_slot_requested(slot: int, is_new_game: bool) -> void:
+	var roman: Array[String] = ["", "I", "II", "III"]
+	var s: int = clampi(slot, 1, SaveSystem.MAX_SLOTS)
+	var title_txt: String = "EXPEDICIÓN %s" % roman[s]
+	var sub_txt: String = "Iniciando nueva campaña Artemis II..." if is_new_game else "Restaurando progreso de misión..."
+
+	hud.transition.play_teleport(title_txt, sub_txt, func() -> void:
+		SaveSystem.select_slot(s)
+		if is_new_game or not SaveSystem.has_save(s):
+			AchievementManager.reset()
+			ObjectiveManager.start_new_campaign()
+			SaveSystem.has_loaded_pose = false
+			world.sync_from_campaign_state(true)
+			SaveSystem.save_progress(s, player)
+		else:
+			SaveSystem.load_progress(s)
+			world.sync_from_campaign_state(false)
+		_gameplay_started = true
+		main_menu.hide_menu()
+		hud.set_menu_blocked(false)
+		hud.show_hud_notice("Archivo %s activo · Sigue la baliza (H: briefing | ESC: pausa)" % roman[s], UITheme.CYAN)
+	)
+
+func _on_return_to_menu_requested() -> void:
+	_gameplay_started = false
+	hud.transition.play_teleport("ARCHIVOS DE MISIÓN", "Guardando y regresando al menú principal", func() -> void:
+		hud.set_menu_blocked(true)
+		main_menu.show_menu("slots")
+	)
 
 func _process(delta: float) -> void:
 	GameState.mission_time_sec += delta
 
-func _run_automated_verification(player: FirstPersonPlayer, hud: MissionControlHUD, world: WorldManager) -> void:
+func _run_automated_verification() -> void:
 	print("[TEST] === Cosmic Blueprint: Misión Artemis (Self-Test) ===")
 	ObjectiveManager.start_new_campaign()
 
@@ -45,7 +93,7 @@ func _run_automated_verification(player: FirstPersonPlayer, hud: MissionControlH
 		str(player.global_position), str(anim_list), str(tp_ok)
 	])
 
-	# 2. Verificar ventanas emergentes (sin solapamientos ni bloqueo de ratón), InfoPopup y Transición Adopt Me
+	# 2. Verificar ventanas emergentes (sin solapamientos ni bloqueo de ratón), InfoPopup, Transición y 31 minijuegos
 	var start_auto_popup_off: bool = not hud.briefing.visible
 	hud.open_briefing()
 	var lock1: bool = player.ui_open and hud.briefing.visible
@@ -90,7 +138,7 @@ func _run_automated_verification(player: FirstPersonPlayer, hud: MissionControlH
 	var dv_tli: float = AeroPhysics.tsiolkovsky_delta_v(465.0, 32000.0, 15000.0)
 	var fr_eval: Dictionary = AeroPhysics.evaluate_free_return(7400.0, 3100.0)
 	var re_eval: Dictionary = AeroPhysics.evaluate_reentry_corridor(-6.25)
-	print("[TEST] 3. Física -> SLS TWR: %.2f (safe=%s) | Tsiolkovsky dV: %.0f m/s | FreeReturn: %s | Reentrada: %s" % [
+	print("[TEST] 3. Física -> SLS TWR: %.2f (safe=true? %s) | Tsiolkovsky dV: %.0f m/s | FreeReturn: %s | Reentrada: %s" % [
 		float(sls_eval["twr"]), str(sls_eval["safe_liftoff"]), dv_tli, str(fr_eval["valid"]), str(re_eval["safe"])
 	])
 
@@ -138,8 +186,24 @@ func _run_automated_verification(player: FirstPersonPlayer, hud: MissionControlH
 		int(receipt.get("score", 0))
 	])
 
-	SaveSystem.save_progress()
-	var save_ok: bool = SaveSystem.has_save()
-	SaveSystem.delete_save()
-	print("[TEST] 5. SaveSystem OK: %s | Baliza válida: %s" % [str(save_ok), str(is_instance_valid(world.beacon))])
+	# 5. Verificar Menú Principal (título/partidas/opciones), 3 Ranuras Cuphead/Hollow Knight y Mini Menú ESC
+	hud.open_pause_menu()
+	var pause_open_ok: bool = hud.pause_menu.visible and get_tree().paused and player.ui_open
+	hud.close_pause_menu()
+	var pause_close_ok: bool = not hud.pause_menu.visible and not get_tree().paused and not player.ui_open
+
+	SaveSystem.save_progress(3, player)
+	var sum3: Dictionary = SaveSystem.get_slot_summary(3)
+	var slot_ok: bool = SaveSystem.has_save(3) and not bool(sum3.get("empty", true)) and int(sum3.get("completed_count", 0)) == 43
+	main_menu.show_menu("slots")
+	var menu_slots_ok: bool = main_menu.visible and main_menu.get_current_view() == "slots" and SaveSystem.get_all_slot_summaries().size() == 3
+	main_menu.show_view("options")
+	var menu_opts_ok: bool = main_menu.get_current_view() == "options"
+	main_menu.hide_menu()
+	SaveSystem.delete_save(3)
+	var del_ok: bool = not SaveSystem.has_save(3)
+	get_tree().paused = false
+	print("[TEST] 5. Menú & Pausa ESC & 3 Ranuras -> Pause=%s/%s | Slot3=%s | MenuViews=%s/%s | Delete=%s | Baliza=%s" % [
+		str(pause_open_ok), str(pause_close_ok), str(slot_ok), str(menu_slots_ok), str(menu_opts_ok), str(del_ok), str(is_instance_valid(world.beacon))
+	])
 	get_tree().quit(0)

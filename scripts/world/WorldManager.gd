@@ -1075,6 +1075,26 @@ func _on_objective_started(obj: Dictionary) -> void:
 			badge_node.visible = false
 			badge_node.collision_layer = 0
 
+func sync_from_campaign_state(is_new_campaign: bool = false) -> void:
+	if is_instance_valid(player):
+		if is_new_campaign or not SaveSystem.has_loaded_pose:
+			player.global_position = Vector3(0.0, 0.25, 30.0)
+			player.rotation.y = 0.0
+		else:
+			player.global_position = SaveSystem.last_loaded_player_pos
+			player.rotation.y = SaveSystem.last_loaded_player_yaw
+		player.velocity = Vector3.ZERO
+	if is_instance_valid(badge_node):
+		var show_badge: bool = is_new_campaign or not ObjectiveManager.completed_ids.has("home_badge")
+		badge_node.visible = show_badge
+		badge_node.collision_layer = 5 if show_badge else 0
+	if is_instance_valid(_gate_arm):
+		var gate_open: bool = (not is_new_campaign) and ObjectiveManager.completed_ids.has("campus_gate")
+		_gate_arm.rotation_degrees.z = 72.0 if gate_open else 0.0
+	_sync_vab_rocket_visuals()
+	_sync_sign_visuals()
+	_refresh_beacon()
+
 func _process(delta: float) -> void:
 	_anim_t += delta
 	if _portal_cooldown > 0.0:

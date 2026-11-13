@@ -12,6 +12,7 @@ var _is_transitioning: bool = false
 
 func _ready() -> void:
 	layer = 30
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	visible = false
 
 	rect = ColorRect.new()

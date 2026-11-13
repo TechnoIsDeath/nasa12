@@ -6,6 +6,8 @@ extends CanvasLayer
 ## las ventanas de Briefing [H], Glosario [G] y Logros [L] se abren bajo demanda o al pulsar [E].
 
 signal minigame_requested(challenge_id: String)
+signal return_to_main_menu_requested()
+signal quit_game_requested()
 
 var player: FirstPersonPlayer
 var tracker: ObjectiveTracker
@@ -14,7 +16,9 @@ var toast: AchievementToast
 var ach_tree: AchievementTree
 var briefing: ChallengeBriefing
 var info_popup: InfoTerminalPopup
+var pause_menu: PauseMenu
 var transition: TransitionOverlay
+var menu_blocked: bool = false
 
 var prompt_panel: PanelContainer
 var prompt_lbl: Label
@@ -30,6 +34,7 @@ var minigame_layer: Control
 
 func _ready() -> void:
 	layer = 10
+	process_mode = Node.PROCESS_MODE_ALWAYS
 
 	# Overlay CRT sutil (activable en MCC)
 	crt_overlay = ColorRect.new()
@@ -173,6 +178,35 @@ func _ready() -> void:
 
 	_build_receipt_panel()
 
+	pause_menu = PauseMenu.new()
+	pause_menu.resume_requested.connect(close_pause_menu)
+	pause_menu.save_requested.connect(func() -> void:
+		SaveSystem.save_progress(-1, player)
+	)
+	pause_menu.open_briefing_requested.connect(func() -> void:
+		close_pause_menu()
+		open_briefing()
+	)
+	pause_menu.open_achievements_requested.connect(func() -> void:
+		close_pause_menu()
+		open_achievements()
+	)
+	pause_menu.open_glossary_requested.connect(func() -> void:
+		close_pause_menu()
+		open_glossary()
+	)
+	pause_menu.return_to_menu_requested.connect(func() -> void:
+		SaveSystem.save_progress(-1, player)
+		close_pause_menu()
+		close_all_modals()
+		return_to_main_menu_requested.emit()
+	)
+	pause_menu.quit_requested.connect(func() -> void:
+		SaveSystem.save_progress(-1, player)
+		quit_game_requested.emit()
+	)
+	add_child(pause_menu)
+
 	transition = TransitionOverlay.new()
 	add_child(transition)
 
@@ -209,12 +243,47 @@ func _on_zone_changed(z: String) -> void:
 		"MCC": "CONTROL DE MISIÓN (MOCR)"
 	}
 	zone_lbl.text = "UBICACIÓN: %s" % String(pretty.get(z, z))
-	crt_overlay.visible = (z == "MCC")
+	crt_overlay.visible = (z == "MCC") and GameState.crt_enabled
+
+func set_menu_blocked(blocked: bool) -> void:
+	menu_blocked = blocked
+	if blocked:
+		if pause_menu:
+			pause_menu.close_pause()
+		close_all_modals()
+	_sync_ui_lock()
+
+func open_pause_menu() -> void:
+	if menu_blocked or pause_menu == null:
+		return
+	pause_menu.open_pause()
+	_sync_ui_lock()
+
+func close_pause_menu() -> void:
+	if pause_menu == null:
+		return
+	pause_menu.close_pause()
+	crt_overlay.visible = (GameState.current_zone == "MCC") and GameState.crt_enabled
+	_sync_ui_lock()
+
+func close_all_modals() -> void:
+	if briefing and briefing.visible:
+		briefing.visible = false
+	if ach_tree and ach_tree.visible:
+		ach_tree.visible = false
+	if receipt_overlay and receipt_overlay.visible:
+		receipt_overlay.visible = false
+	if info_popup and info_popup.visible:
+		info_popup.visible = false
+	clear_minigames()
 
 func _sync_ui_lock() -> void:
+	var pause_open: bool = pause_menu != null and pause_menu.visible
+	if get_tree():
+		get_tree().paused = menu_blocked or pause_open
 	if player == null:
 		return
-	var any_open: bool = briefing.visible or ach_tree.visible or receipt_overlay.visible or info_popup.visible or has_active_minigame()
+	var any_open: bool = menu_blocked or pause_open or briefing.visible or ach_tree.visible or receipt_overlay.visible or info_popup.visible or has_active_minigame()
 	player.set_ui_open(any_open)
 
 func open_briefing(obj: Dictionary = {}) -> void:
@@ -288,28 +357,39 @@ func clear_minigames() -> void:
 	_sync_ui_lock()
 
 func _input(event: InputEvent) -> void:
+	if menu_blocked:
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		var k := event as InputEventKey
 		if k.keycode == KEY_H:
+			if pause_menu and pause_menu.visible:
+				pause_menu.close_pause()
 			get_viewport().set_input_as_handled()
 			if briefing.visible and not briefing.is_glossary_mode:
 				briefing.hide_panel()
 			else:
 				open_briefing()
 		elif k.keycode == KEY_G:
+			if pause_menu and pause_menu.visible:
+				pause_menu.close_pause()
 			get_viewport().set_input_as_handled()
 			if briefing.visible and briefing.is_glossary_mode:
 				briefing.hide_panel()
 			else:
 				open_glossary()
 		elif k.keycode == KEY_L:
+			if pause_menu and pause_menu.visible:
+				pause_menu.close_pause()
 			get_viewport().set_input_as_handled()
 			if ach_tree.visible:
 				ach_tree.hide_tree()
 			else:
 				open_achievements()
 		elif k.keycode == KEY_ESCAPE:
-			if briefing.visible:
+			if pause_menu and pause_menu.visible:
+				get_viewport().set_input_as_handled()
+				close_pause_menu()
+			elif briefing.visible:
 				get_viewport().set_input_as_handled()
 				briefing.hide_panel()
 			elif ach_tree.visible:
@@ -326,6 +406,9 @@ func _input(event: InputEvent) -> void:
 			elif has_active_minigame():
 				get_viewport().set_input_as_handled()
 				clear_minigames()
+			else:
+				get_viewport().set_input_as_handled()
+				open_pause_menu()
 
 func _build_receipt_panel() -> void:
 	receipt_overlay = Control.new()

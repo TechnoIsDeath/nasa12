@@ -306,8 +306,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var mm := event as InputEventMouseMotion
-		rotate_y(deg_to_rad(-mm.relative.x * MOUSE_SENSITIVITY))
-		head.rotate_x(deg_to_rad(-mm.relative.y * MOUSE_SENSITIVITY))
+		var sens: float = GameState.mouse_sensitivity if GameState else MOUSE_SENSITIVITY
+		rotate_y(deg_to_rad(-mm.relative.x * sens))
+		head.rotate_x(deg_to_rad(-mm.relative.y * sens))
 		var max_pitch: float = 55.0 if third_person else 82.0
 		head.rotation.x = clampf(head.rotation.x, deg_to_rad(-max_pitch), deg_to_rad(max_pitch))
 		_looked_deg += absf(mm.relative.x) + absf(mm.relative.y)
